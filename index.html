@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>鬼嫁から逃げろ：青鬼風（座標修正・マスク方式＋演出強化＋ゲームオーバー＋サウンド）</title>
+<style>
+  :root{
+    --ink:#0b0f1f;--panel:#121733;--line:#273357;--txt:#e7ecf3;
+    --accent:#5ee1ff;
+    --oni:#ff3b3b; --oniGlow:#ff6b6b; --oniBg1:#2b0606; --oniBg2:#530909;
+    --playerBg:rgba(24,32,64,.75);
+  }
+  html,body{margin:0;background:var(--ink);color:var(--txt);font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif}
+  #wrap{min-height:100svh;display:flex;justify-content:center;align-items:center;padding:8px}
+  .frame{width:min(100%,1920px);background:#0b0f1f;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.55);overflow:hidden}
+  header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .btn{background:#18224a;border:1px solid #2a3c7a;color:#e7ecf3;padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer}
+  .btn:hover{filter:brightness(1.1)}
+  .stage{position:relative;width:100%;background:#000}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:1920/1080}
+  .hud{position:absolute;left:10px;top:10px;display:flex;gap:8px;z-index:2}
+  .pill{background:rgba(14,20,44,.8);border:1px solid #3a4b8c;border-radius:999px;padding:6px 10px;font-weight:800}
+  .tip{position:absolute;right:10px;top:10px;opacity:.7;font-size:12px;z-index:2}
+
+  /* ===== ポートレート（共通） ===== */
+  .dialog{
+    position:absolute;left:0;right:0;bottom:0;display:flex;gap:12px;align-items:center;
+    padding:12px 16px;
+    background:linear-gradient(180deg, rgba(10,14,26,0), rgba(10,14,26,.9) 18%, rgba(10,14,26,.96));
+    z-index:3;
+  }
+  .face{
+    width:84px;height:84px;border-radius:10px;object-fit:cover;border:2px solid #3a4b8c;background:#111;flex:0 0 auto;
+    box-shadow:0 0 0 2px rgba(0,0,0,.35) inset, 0 8px 20px rgba(0,0,0,.45);
+  }
+  .bubble{
+    flex:1;border:1px solid #3a4b8c;border-radius:14px;padding:12px 16px;font-weight:800;line-height:1.55;
+    background:var(--playerBg);
+    font-size:20px;letter-spacing:.2px;text-shadow:0 1px 0 rgba(0,0,0,.4);
+    transition:all .18s ease;
+  }
+
+  /* ===== 鬼 演出強化 ===== */
+  .dialog--oni{
+    background:
+      linear-gradient(180deg, rgba(255,0,0,0) 0%, rgba(255,0,0,.12) 16%, rgba(255,0,0,.20) 35%, rgba(10,14,26,.96) 100%),
+      linear-gradient(180deg, rgba(10,14,26,0), rgba(10,14,26,.9) 18%, rgba(10,14,26,.96));
+  }
+  .dialog--oni .face{
+    border-color:var(--oniGlow);
+    box-shadow:0 0 12px var(--oniGlow), 0 0 0 2px rgba(0,0,0,.5) inset;
+  }
+  .dialog--oni .bubble{
+    color:var(--oni);
+    background:linear-gradient(180deg,var(--oniBg2),var(--oniBg1));
+    border-color:rgba(255,0,0,.35);
+    text-shadow:0 0 6px rgba(255,0,0,.65), 0 1px 0 rgba(0,0,0,.65);
+    font-size:30px; letter-spacing:1.2px; transform:translateZ(0);
+    animation:popIn .15s ease-out;
+  }
+  @keyframes popIn{from{transform:scale(.98);opacity:.9} to{transform:scale(1);opacity:1}}
+  .dialog--oni.shake .bubble{ animation:shake .45s cubic-bezier(.36,.07,.19,.97) both }
+  @keyframes shake{
+    10%,90%{transform:translate3d(-1px,0,0)}
+    20%,80%{transform:translate3d(2px,0,0)}
+    30%,50%,70%{transform:translate3d(-4px,0,0)}
+    40%,60%{transform:translate3d(4px,0,0)}
+  }
+
+  /* ====== ゲームオーバー（ポップアップ） ====== */
+  .gameover{
+    position:absolute; inset:0; display:none; place-items:center; z-index:5;
+    background:radial-gradient(ellipse at center, rgba(120,0,0,.25), rgba(0,0,0,.85) 60%);
+    backdrop-filter: blur(1px);
+  }
+  .gameover.is-show{ display:grid; animation:goFade .18s ease-out both }
+  @keyframes goFade{ from{opacity:0} to{opacity:1} }
+
+  .go-panel{
+    max-width:min(92%, 1400px);
+    width:92%;
+    aspect-ratio:16/9;
+    border-radius:14px;
+    overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 0 2px rgba(255,0,0,.25) inset;
+    position:relative;
+    background:#000;
+  }
+  .go-img{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    filter:saturate(1.05) contrast(1.05) brightness(.98);
+    animation:imgPop .22s ease-out both;
+  }
+  @keyframes imgPop{ from{transform:scale(1.03)} to{transform:scale(1)} }
+
+  .go-ui{
+    position:absolute; left:0; right:0; bottom:0; padding:10px 12px; display:flex; gap:10px; justify-content:flex-end;
+    background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.35));
+  }
+  .go-btn{
+    appearance:none; border:1px solid #ff6b6b; color:#fff; background:#b31212; font-weight:900;
+    padding:10px 16px; border-radius:10px; cursor:pointer; letter-spacing:.1em;
+    text-shadow:0 1px 0 rgba(0,0,0,.6);
+    box-shadow:0 6px 16px rgba(179,18,18,.35);
+  }
+  .go-btn:hover{ filter:brightness(1.08) }
+  .go-sub{
+    position:absolute; left:12px; bottom:12px; font-size:13px; opacity:.85; color:#ffdede;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="frame">
+    <header>
+      <div>鬼嫁から逃げろ：青鬼風（座標修正・マスク方式＋演出強化）</div>
+      <div style="display:flex;gap:8px">
+        <button id="muteBtn" class="btn" title="M">🔊 ON</button>
+        <button id="startBtn" class="btn">ゲーム開始</button>
+        <button id="resetBtn" class="btn">リセット</button>
+      </div>
+    </header>
+
+    <div class="stage">
+      <canvas id="cv" width="1920" height="1080"></canvas>
+      <div class="hud">
+        <div class="pill">TIME <span id="time">0.0</span>s</div>
+        <div class="pill">STATE <span id="state">PATROL</span></div>
+      </div>
+      <div class="dialog" id="dialog">
+        <img id="face" class="face" alt="">
+        <div id="line" class="bubble">準備中…</div>
+      </div>
+      <div class="tip">Space：当たり判定オーバーレイ切替（画像マスク/格子）</div>
+
+      <!-- ▼ ゲームオーバー：捕まったら出る -->
+      <div class="gameover" id="gameover">
+        <div class="go-panel">
+          <img id="goImg" class="go-img" alt="gameover">
+          <div class="go-ui">
+            <button id="retryBtn" class="go-btn">リトライ（R）</button>
+            <button id="closeBtn" class="go-btn" style="background:#333;border-color:#888">閉じる（Esc）</button>
+          </div>
+          <div class="go-sub">鬼に捕まった！スペースで当たり判定、Rで再挑戦</div>
+        </div>
+      </div>
+      <!-- ▲ ゲームオーバー -->
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== 基本セットアップ ===== */
+const VIEW_W = 1920, VIEW_H = 1080;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const ui = {
+  start: document.getElementById('startBtn'),
+  reset: document.getElementById('resetBtn'),
+  mute : document.getElementById('muteBtn'),
+  time : document.getElementById('time'),
+  state: document.getElementById('state'),
+  face : document.getElementById('face'),
+  line : document.getElementById('line'),
+  dialog: document.getElementById('dialog'),
+  goLayer: document.getElementById('gameover'),
+  goImg: document.getElementById('goImg'),
+  retry: document.getElementById('retryBtn'),
+  close: document.getElementById('closeBtn')
+};
+
+const assets = { map:null, player:null, oni:null, facePlayer:null, faceOni:null, mask:null, gameover:null };
+
+/* ====== サウンド（Web Audio） ====== */
+const audio = {
+  ctx:null, master:null, bgmGain:null, sfxGain:null,
+  bgmSrc:null, buffers:{}, muted:false, currentBgm:null
+};
+async function initAudioOnce(){
+  if(audio.ctx) return;
+  audio.ctx = new (window.AudioContext||window.webkitAudioContext)();
+  audio.master = audio.ctx.createGain();
+  audio.bgmGain = audio.ctx.createGain();
+  audio.sfxGain = audio.ctx.createGain();
+  audio.bgmGain.gain.value = 0.7;
+  audio.sfxGain.gain.value = 1.0;
+  audio.bgmGain.connect(audio.master);
+  audio.sfxGain.connect(audio.master);
+  audio.master.connect(audio.ctx.destination);
+  const resume = ()=>{ audio.ctx.resume(); window.removeEventListener('touchend', resume); window.removeEventListener('click', resume); };
+  window.addEventListener('touchend', resume, {once:true});
+  window.addEventListener('click', resume, {once:true});
+
+  await Promise.all([
+    loadBuffer('bgm/main_loop.mp3','bgm_main'),
+    loadBuffer('bgm/chase_loop.mp3','bgm_chase'),
+    loadBuffer('se/step.wav','se_step'),
+    loadBuffer('se/catch.mp3','se_catch'),
+    loadBuffer('se/click.mp3','se_click'),
+  ].map(p=>p.catch(()=>{}))); // ファイル未配置でも落ちないように
+}
+async function loadBuffer(url,key){
+  const res = await fetch(url); const arr = await res.arrayBuffer();
+  audio.buffers[key] = await new Promise((ok,ng)=>audio.ctx.decodeAudioData(arr, ok, ng));
+}
+function playBgm(key,{fade=0.5,loop=true}={}){
+  if(!audio.ctx || !audio.buffers[key]) return;
+  if(audio.currentBgm===key) return;
+  stopBgm(0.15);
+  const src = audio.ctx.createBufferSource();
+  src.buffer = audio.buffers[key]; src.loop = loop;
+  src.connect(audio.bgmGain);
+  src.start(0);
+  audio.bgmSrc = src; audio.currentBgm = key;
+  const g = audio.bgmGain.gain, now=audio.ctx.currentTime;
+  g.setValueAtTime(0, now);
+  g.linearRampToValueAtTime(audio.muted ? 0 : 0.7, now+fade);
+}
+function stopBgm(fade=0.3){
+  if(!audio.bgmSrc) return;
+  const g = audio.bgmGain.gain, now=audio.ctx.currentTime;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(g.value, now);
+  g.linearRampToValueAtTime(0, now+fade);
+  const s = audio.bgmSrc; audio.bgmSrc=null; audio.currentBgm=null;
+  setTimeout(()=>{ try{s.stop(); s.disconnect();}catch{} }, fade*1000+20);
+}
+function playSfx(key,{volume=1,rate=1}={}){
+  if(!audio.ctx || !audio.buffers[key]) return;
+  const src = audio.ctx.createBufferSource();
+  const g = audio.ctx.createGain(); g.gain.value = audio.muted ? 0 : volume;
+  src.buffer = audio.buffers[key]; src.playbackRate.value = rate;
+  src.connect(g); g.connect(audio.sfxGain); src.start(0);
+}
+function setMuted(m){
+  audio.muted = m;
+  if(audio.ctx){ audio.master.gain.setTargetAtTime(m?0:1, audio.ctx.currentTime, 0.01); }
+  ui.mute.textContent = m ? '🔇 OFF' : '🔊 ON';
+}
+
+/* ====== 画像ロード ====== */
+function loadImage(src){
+  return new Promise((res, rej)=>{
+    const i = new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src;
+  });
+}
+function loadImageOptional(src){
+  return new Promise((res)=>{
+    const i = new Image(); i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src;
+  });
+}
+
+// ワールド（背景画像の実寸）と画面の変換
+let WORLD_W=0, WORLD_H=0, SCALE=1, OFFX=0, OFFY=0;
+
+// グリッド／衝突
+let TILE=24;          
+let COLS=0, ROWS=0;
+let grid=null;        
+let useMask=false;    
+
+// 方向＆アニメ
+const DIR={UP:0,LEFT:1,DOWN:2,RIGHT:3};
+function makeAnim(){ return {dir:DIR.DOWN, f:1, t:0, rows:3, cols:3, hasLeft:false, rightRow:1, downRow:0, upRow:2}; }
+
+async function preload(){
+  assets.map = await loadImage('map_1920x1080.png');   // 実寸 1536x1024 を想定
+  assets.player = await loadImage('player.png');
+  assets.oni    = await loadImage('oni.png');
+  assets.facePlayer = await loadImage('portrait_player.png');
+  assets.faceOni    = await loadImage('portrait_oni.png');
+  assets.mask      = await loadImageOptional('collision_mask.png');
+  assets.gameover  = await loadImageOptional('gameover.png');
+
+  WORLD_W = assets.map.naturalWidth;
+  WORLD_H = assets.map.naturalHeight;
+
+  const sx = VIEW_W / WORLD_W, sy = VIEW_H / WORLD_H;
+  SCALE = Math.min(sx, sy);
+  OFFX = Math.floor((VIEW_W - WORLD_W * SCALE) / 2);
+  OFFY = Math.floor((VIEW_H - WORLD_H * SCALE) / 2);
+
+  TILE = Math.round(WORLD_W / 64);
+  COLS = Math.floor(WORLD_W / TILE);
+  ROWS = Math.floor(WORLD_H / TILE);
+}
+
+function worldToScreen(x,y){ return { x: Math.round(OFFX + x * SCALE), y: Math.round(OFFY + y * SCALE) }; }
+function drawImageFit(img){ ctx.drawImage(img, OFFX, OFFY, Math.round(WORLD_W*SCALE), Math.round(WORLD_H*SCALE)); }
+
+function analyzeSheet(img){
+  const cols=3;
+  const rows=(img.naturalHeight/img.naturalWidth>1.25)?4:3;
+  return { rows, cols, hasLeft: rows===4, upRow: rows===4?0:2, leftRow: rows===4?1:1, downRow: rows===4?2:0, rightRow: rows===4?3:1 };
+}
+
+function drawSprite(ent, img, size){
+  const A=ent.anim;
+  let row=A.downRow;
+  if(A.dir===DIR.UP) row=A.upRow;
+  else if(A.dir===DIR.RIGHT) row=A.rightRow;
+  else if(A.dir===DIR.LEFT)  row=A.hasLeft?A.leftRow:A.rightRow;
+
+  const sw=img.naturalWidth/A.cols, sh=img.naturalHeight/A.rows;
+  const sx=A.f*sw, sy=row*sh;
+  const p=worldToScreen(ent.x,ent.y);
+  const w=size*SCALE, h=size*SCALE;
+
+  const mirror=(A.dir===DIR.LEFT && !A.hasLeft);
+  if(mirror){ ctx.save(); ctx.translate(p.x,p.y); ctx.scale(-1,1); ctx.drawImage(img,sx,sy,sw,sh,-w/2,-h/2,w,h); ctx.restore(); }
+  else { ctx.drawImage(img,sx,sy,sw,sh,p.x-w/2,p.y-h/2,w,h); }
+}
+
+function updateAnim(ent,vx,vy,moving){
+  if(moving){
+    if(Math.abs(vx)>Math.abs(vy)) ent.anim.dir = (vx>0)?DIR.RIGHT:DIR.LEFT;
+    else if(Math.abs(vy)>0)       ent.anim.dir = (vy>0)?DIR.DOWN:DIR.UP;
+    if(++ent.anim.t>=10){ ent.anim.t=0; ent.anim.f=(ent.anim.f+1)%ent.anim.cols; }
+  } else ent.anim.f=1;
+}
+
+// 衝突
+function inGrid(x,y){ return x>=0&&y>=0&&x<COLS&&y<ROWS; }
+function isBlockedPx(px,py){
+  const gx=Math.floor(px/TILE), gy=Math.floor(py/TILE);
+  return !inGrid(gx,gy) || grid[gy][gx]===1;
+}
+function moveEntity(ent, dx, dy){
+  let nx=ent.x+dx, ny=ent.y+dy;
+  if(!isBlockedPx(nx, ent.y)) ent.x=nx;
+  if(!isBlockedPx(ent.x, ny)) ent.y=ny;
+}
+function snapToWalkable(px,py){
+  let gx=Math.floor(px/TILE), gy=Math.floor(py/TILE);
+  if(!inGrid(gx,gy) || grid[gy][gx]===1){
+    const ring=[[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+    for(const [dx,dy] of ring){ const x=gx+dx,y=gy+dy; if(inGrid(x,y)&&grid[y][x]===0){gx=x;gy=y;break;} }
+  }
+  return { x: gx*TILE+TILE/2, y: gy*TILE+TILE/2 };
+}
+function neighbors(x,y){
+  return [[1,0],[-1,0],[0,1],[0,-1]]
+    .map(([dx,dy])=>[x+dx,y+dy])
+    .filter(([nx,ny])=>inGrid(nx,ny)&&grid[ny][nx]===0);
+}
+function astar(sx,sy,gx,gy){
+  const key=(x,y)=>x+'_'+y; const open=new Map(), pq=[];
+  const h=(x,y)=>Math.abs(x-gx)+Math.abs(y-gy);
+  function push(n){ pq.push(n); pq.sort((a,b)=>a.f-b.f); open.set(key(n.x,n.y),n); }
+  function pop(){ const n=pq.shift(); open.delete(key(n.x,n.y)); return n; }
+  const start={x:sx,y:sy,g:0,f:h(sx,sy),p:null}; push(start);
+  const closed=new Set();
+  while(pq.length){
+    const n=pop();
+    if(n.x===gx && n.y===gy){
+      const path=[]; for(let c=n;c;c=c.p) path.push([c.x,c.y]); return path.reverse();
+    }
+    closed.add(key(n.x,n.y));
+    for(const [nx,ny] of neighbors(n.x,n.y)){
+      const k=key(nx,ny); if(closed.has(k)) continue;
+      const g2=n.g+1, f2=g2+h(nx,ny);
+      const old=open.get(k); if(!old || g2<old.g) push({x:nx,y:ny,g:g2,f:f2,p:n});
+    }
+  }
+  return null;
+}
+
+/* ==== 衝突：画像マスク優先 / JSON フォールバック ==== */
+async function loadCollision(){
+  grid = Array.from({length:ROWS},()=>Array(COLS).fill(0));
+
+  if(assets.mask){
+    useMask = true;
+    const oc = document.createElement('canvas');
+    oc.width = WORLD_W; oc.height = WORLD_H;
+    const octx = oc.getContext('2d');
+    octx.drawImage(assets.mask, 0, 0, WORLD_W, WORLD_H);
+    const img = octx.getImageData(0,0,WORLD_W,WORLD_H).data;
+
+    const thAlpha = 40, thRatio = 0.08;
+    for(let gy=0; gy<ROWS; gy++){
+      for(let gx=0; gx<COLS; gx++){
+        const x0 = gx*TILE, y0 = gy*TILE;
+        const x1 = Math.min(x0+TILE, WORLD_W), y1 = Math.min(y0+TILE, WORLD_H);
+        let painted=0, total=0;
+        for(let y=y0; y<y1; y+=2){
+          let idx = (y*WORLD_W + x0) * 4;
+          for(let x=x0; x<x1; x+=2){
+            if(img[idx+3] > thAlpha) painted++;
+            total++; idx+=8;
+          }
+        }
+        if(painted/total >= thRatio) grid[gy][gx]=1;
+      }
+    }
+    return;
+  }
+
+  useMask = false;
+  const res = await fetch('collision.json');
+  const data = await res.json();
+  const srcW = (data.meta && data.meta.width)  ? data.meta.width  : WORLD_W;
+  const srcH = (data.meta && data.meta.height) ? data.meta.height : WORLD_H;
+  const sx = WORLD_W / srcW;
+  const sy = WORLD_H / srcH;
+  const toG = (v, s)=> Math.floor((v*s)/TILE);
+
+  for(const r of (data.solids||[])){
+    const x0=Math.max(0, toG(r.x, sx)), y0=Math.max(0, toG(r.y, sy));
+    const x1=Math.min(COLS-1, toG(r.x+r.w-1, sx)), y1=Math.min(ROWS-1, toG(r.y+r.h-1, sy));
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) grid[y][x]=1;
+  }
+}
+
+/* ==== デバッグ描画 ==== */
+let debug=false;
+function drawCollisionOverlay(){
+  ctx.save();
+  ctx.globalAlpha = .28;
+  ctx.fillStyle='#ff4d6d';
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      if(grid[y][x]===1){
+        const p=worldToScreen(x*TILE,y*TILE);
+        ctx.fillRect(p.x,p.y, Math.ceil(TILE*SCALE), Math.ceil(TILE*SCALE));
+      }
+    }
+  }
+  ctx.globalAlpha = .18;
+  ctx.strokeStyle='#ffffff';
+  ctx.lineWidth=1;
+  for(let x=0;x<=COLS;x++){
+    const p=worldToScreen(x*TILE,0), q=worldToScreen(x*TILE,WORLD_H);
+    ctx.beginPath(); ctx.moveTo(p.x+.5,p.y); ctx.lineTo(q.x+.5,q.y); ctx.stroke();
+  }
+  for(let y=0;y<=ROWS;y++){
+    const p=worldToScreen(0,y*TILE), q=worldToScreen(WORLD_W,y*TILE);
+    ctx.beginPath(); ctx.moveTo(p.x,q.y+.5); ctx.lineTo(q.x,q.y+.5); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/* ===== キャラ・台詞 ===== */
+const player={x:180,y:180,r:12,speed:2.6,anim:makeAnim()};
+const oni   ={x:1000,y:330,r:16,speed:2.2,anim:makeAnim(),state:'PATROL',path:[],target:null,_rv:{x:0,y:0}};
+const lines={
+  player_idle:"探索中…静かに…",
+  player_chase:"ヤバいヤバい！逃げろー！",
+  oni_patrol:"クソ旦那ァァァ…どこだぁ？？？？",
+  oni_chase:"見つけたァ！逃がさない！！"
+};
+let lastSpeak=0;
+
+function say(faceImg, text){
+  ui.face.src = faceImg;
+  ui.line.textContent = text;
+  const isOni = (assets.faceOni && faceImg === assets.faceOni.src);
+  ui.dialog.classList.toggle('dialog--oni', isOni);
+  ui.dialog.classList.remove('shake');
+  if(isOni){ requestAnimationFrame(()=>ui.dialog.classList.add('shake')); }
+  lastSpeak = performance.now();
+}
+
+/* ===== 入力 ===== */
+const keys=new Set();
+addEventListener('keydown', e=>{
+  keys.add(e.key);
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if(e.code==='Space') debug=!debug;
+  if(over){
+    if(e.key==='r' || e.key==='R') doRetry();
+    if(e.key==='Escape') closeGameOver();
+  }
+});
+addEventListener('keyup', e=>keys.delete(e.key));
+
+/* ===== ループ ===== */
+let started=false, over=false, frame=0, lastTs=0;
+
+function update(ts){
+  if(!started||over){ lastTs=ts; return; }
+  const dt=(ts - lastTs)/16.6667; lastTs=ts; frame++;
+
+  // プレイヤー
+  let vx=(keys.has('ArrowRight')||keys.has('d')||keys.has('D')) - (keys.has('ArrowLeft')||keys.has('a')||keys.has('A'));
+  let vy=(keys.has('ArrowDown') ||keys.has('s')||keys.has('S')) - (keys.has('ArrowUp')  ||keys.has('w')||keys.has('W'));
+  const mag=Math.hypot(vx,vy)||1; const moving=(vx||vy);
+  moveEntity(player,(vx/mag)*player.speed*dt,(vy/mag)*player.speed*dt);
+  updateAnim(player, vx, vy, !!moving);
+
+  // 足音（軽く）
+  if(moving && audio.ctx && frame%6===0){ playSfx('se_step', {volume:0.25, rate:0.95+Math.random()*0.1}); }
+
+  // 鬼AI（簡易）
+  const DETECT=260*(WORLD_W/1920);
+  const dx=player.x-oni.x, dy=player.y-oni.y, d=Math.hypot(dx,dy);
+  if(d < DETECT){
+    const sp=oni.speed*1.15*dt; const vxO=(dx/d)*sp, vyO=(dy/d)*sp;
+    updateAnim(oni, vxO, vyO, true); moveEntity(oni, vxO, vyO);
+    if(performance.now()-lastSpeak>1600){ say(assets.faceOni.src, lines.oni_chase); }
+    ui.state.textContent='CHASE';
+    // BGM 切替（追跡）
+    if(audio.ctx) playBgm('bgm_chase', {fade:0.4, loop:true});
+  }else{
+    if(frame%30===0){ const a=Math.random()*Math.PI*2; oni._rv={x:Math.cos(a),y:Math.sin(a)}; }
+    const sp=oni.speed*0.6*dt; updateAnim(oni, oni._rv.x*sp, oni._rv.y*sp, true);
+    moveEntity(oni, oni._rv.x*sp, oni._rv.y*sp);
+    if(performance.now()-lastSpeak>2600){ say(assets.faceOni.src, lines.oni_patrol); }
+    ui.state.textContent='PATROL';
+    // BGM 切替（通常）
+    if(audio.ctx) playBgm('bgm_main', {fade:0.6, loop:true});
+  }
+
+  // 接触 → ゲームオーバー
+  if(Math.hypot(player.x-oni.x, player.y-oni.y) < (player.r+oni.r-2)){
+    triggerGameOver();
+  }
+
+  ui.time.textContent=(parseFloat(ui.time.textContent)+dt/60).toFixed(1);
+}
+
+function draw(){
+  ctx.clearRect(0,0,VIEW_W,VIEW_H);
+  drawImageFit(assets.map);
+
+  if(!player.anim._init && assets.player){ Object.assign(player.anim, analyzeSheet(assets.player)); player.anim._init=true; }
+  if(!oni.anim._init && assets.oni){ Object.assign(oni.anim, analyzeSheet(assets.oni)); oni.anim._init=true; }
+
+  drawSprite(player, assets.player, 48);
+  drawSprite(oni,    assets.oni,    64);
+
+  if(debug) drawCollisionOverlay();
+}
+
+/* ====== ゲームオーバー関連 ====== */
+function triggerGameOver(){
+  if(over) return;
+  over = true;
+  say(assets.faceOni.src, "捕まえたァ！！");
+  if(audio.ctx){ playSfx('se_catch', {volume:1}); stopBgm(0.5); }
+  if(assets.gameover){ ui.goImg.src = assets.gameover.src; }
+  ui.goLayer.classList.add('is-show');
+}
+function closeGameOver(){
+  ui.goLayer.classList.remove('is-show');
+}
+function doRetry(){
+  closeGameOver();
+  started = false;
+  resetPositions();
+  // すぐ再開
+  started = true; over = false; lastTs = performance.now();
+  say(assets.facePlayer.src,"再開！");
+  if(audio.ctx){ playBgm('bgm_main', {fade:0.5, loop:true}); }
+}
+
+/* ===== リセット & UI ===== */
+function resetPositions(){
+  const p=snapToWalkable(180*(WORLD_W/1920),180*(WORLD_H/1080)); player.x=p.x; player.y=p.y;
+  const o=snapToWalkable(1160*(WORLD_W/1920), 330*(WORLD_H/1080)); oni.x=o.x; oni.y=o.y; oni.state='PATROL'; oni.path=[]; oni.target=null;
+  ui.time.textContent='0.0';
+  ui.dialog.classList.remove('dialog--oni','shake');
+  ui.face.src = assets.facePlayer ? assets.facePlayer.src : '';
+  ui.line.textContent = "準備中…";
+  closeGameOver();
+}
+
+ui.start.addEventListener('click', async ()=>{
+  if(!started){
+    await initAudioOnce();
+    playSfx('se_click', {volume:.7});
+    playBgm('bgm_main', {fade:0.6, loop:true});
+    started=true; over=false;
+    lastTs = performance.now();
+    say(assets.facePlayer.src,"探索開始…");
+  }
+});
+ui.reset.addEventListener('click', ()=>{
+  started=false; over=false; resetPositions();
+  if(audio.ctx){ playSfx('se_click', {volume:.6}); playBgm('bgm_main', {fade:0.4, loop:true}); }
+});
+ui.retry.addEventListener('click', doRetry);
+ui.close.addEventListener('click', closeGameOver);
+ui.mute.addEventListener('click', ()=>{
+  if(!audio.ctx) return; setMuted(!audio.muted); playSfx('se_click', {volume:.6});
+});
+
+function loop(ts){ update(ts); draw(); requestAnimationFrame(loop); }
+
+/* ===== Main ===== */
+(async function main(){
+  await preload();
+  await loadCollision();           // collision_mask.png → 無ければ collision.json
+  resetPositions();
+  lastTs = performance.now();
+  loop();
+})();
+</script>
+</body>
+</html>
