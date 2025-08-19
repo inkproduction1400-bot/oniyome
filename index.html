@@ -400,7 +400,7 @@ function snapToWalkable(px,py){
     const ring=[[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
     for(const [dx,dy] of ring){ const x=gx+dx,y=gy+dy; if(inGrid(x,y)&&grid[y][x]===0){gx=x;gy=y;break;} }
   }
-  return { x: gx*TILE+TILE/2, y: gy*TILE+TILE/2 };
+  return { x: gx*TILE+TILE/2, y: gy*TILE+TILE/2, gx, gy };
 }
 function neighbors(x,y){
   return [[1,0],[-1,0],[0,1],[0,-1]]
@@ -525,23 +525,57 @@ function say(faceImg, text){
   lastSpeak = performance.now();
 }
 
-/* ===== アイテム：配置・描画・取得 ===== */
+/* ===== アイテム：ランダム配置・描画・取得 ===== */
+
+/* 通行可能で、周囲 margin タイルも通れる安全なタイルをランダム取得 */
+function randomWalkable(margin=1){
+  for(let tries=0; tries<2000; tries++){
+    const gx=Math.floor(Math.random()*COLS), gy=Math.floor(Math.random()*ROWS);
+    if(!inGrid(gx,gy) || grid[gy][gx]===1) continue;
+    let ok=true;
+    for(let y=gy-margin;y<=gy+margin;y++){
+      for(let x=gx-margin;x<=gx+margin;x++){
+        if(!inGrid(x,y) || grid[y][x]===1){ ok=false; break; }
+      }
+      if(!ok) break;
+    }
+    // 初期配置の近傍を避ける（重なり/超至近を防止）
+    const cx=gx*TILE+TILE/2, cy=gy*TILE+TILE/2;
+    if(Math.hypot(cx-180, cy-180)<TILE*2.2) ok=false;
+    if(Math.hypot(cx-1160, cy-330)<TILE*2.2) ok=false;
+    if(ok) return {x:cx, y:cy, gx, gy};
+  }
+  // 見つからなければ左上から探索
+  for(let gy=margin; gy<ROWS-margin; gy++){
+    for(let gx=margin; gx<COLS-margin; gx++){
+      if(grid[gy][gx]===0) return {x:gx*TILE+TILE/2, y:gy*TILE+TILE/2, gx, gy};
+    }
+  }
+  return {x:TILE*2, y:TILE*2, gx:2, gy:2};
+}
+
 function resetItems(){
   gotCount = 0;
   ui.got.textContent = '0';
-  items = [
-    {id:'money',  img:assets.itMoney,   x:px(740),  y:py(620),  got:false}, // リビング中央やや左
-    {id:'flower', img:assets.itFlowers, x:px(820),  y:py(325),  got:false}, // ダイニング付近
-    {id:'sushi',  img:assets.itSushi,   x:px(1370), y:py(955),  got:false}  // 南東の通路
+
+  const defs = [
+    {id:'money',  img:assets.itMoney},
+    {id:'flower', img:assets.itFlowers},
+    {id:'sushi',  img:assets.itSushi}
   ];
-  // 通行可能セルへスナップ
-  items = items.map(it=>{
-    const p = snapToWalkable(it.x, it.y);
-    return {...it, x:p.x, y:p.y, got:false};
-  });
+  items = [];
+  const used = new Set();
+  for(const d of defs){
+    let spot;
+    // 同じタイルに重ならないようユニーク確保
+    do{ spot = randomWalkable(1); } while(used.has(`${spot.gx}_${spot.gy}`));
+    used.add(`${spot.gx}_${spot.gy}`);
+    items.push({ id:d.id, img:d.img, x:spot.x, y:spot.y, got:false });
+  }
 }
+
 function drawItems(){
-  const size = 42; // 推奨48px前後。画像がなくても簡易描画
+  const size = 42;
   for(const it of items){
     if(it.got) continue;
     const p = worldToScreen(it.x,it.y);
@@ -562,6 +596,7 @@ function drawItems(){
     }
   }
 }
+
 function tryPickup(){
   const R = Math.max(20, TILE*0.7);
   for(const it of items){
@@ -577,6 +612,7 @@ function tryPickup(){
   }
   if(gotCount>=3) triggerWin();
 }
+
 function drawBursts(dt){
   for(let i=bursts.length-1;i>=0;i--){
     const b = bursts[i];
@@ -717,7 +753,7 @@ function resetAll(){
   ui.face.src = assets.facePlayer ? assets.facePlayer.src : '';
   ui.line.textContent = "準備中…";
   closePanels();
-  resetItems();
+  resetItems();   // ★ ランダム再配置
 }
 
 ui.start.addEventListener('click', async ()=>{
