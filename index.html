@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>鬼嫁から逃げろ：青鬼風（座標修正・マスク方式＋演出強化＋ゲームオーバー＋サウンド）</title>
+<title>鬼嫁から逃げろ：青鬼風（座標修正・マスク方式＋演出強化＋ゲームオーバー＋サウンド＋収集勝利）</title>
 <style>
   :root{
     --ink:#0b0f1f;--panel:#121733;--line:#273357;--txt:#e7ecf3;
     --accent:#5ee1ff;
     --oni:#ff3b3b; --oniGlow:#ff6b6b; --oniBg1:#2b0606; --oniBg2:#530909;
     --playerBg:rgba(24,32,64,.75);
+    --winGlow:#54ffa6;
   }
   html,body{margin:0;background:var(--ink);color:var(--txt);font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif}
   #wrap{min-height:100svh;display:flex;justify-content:center;align-items:center;padding:8px}
@@ -19,7 +20,7 @@
   .btn:hover{filter:brightness(1.1)}
   .stage{position:relative;width:100%;background:#000}
   canvas{display:block;width:100%;height:auto;aspect-ratio:1920/1080}
-  .hud{position:absolute;left:10px;top:10px;display:flex;gap:8px;z-index:2}
+  .hud{position:absolute;left:10px;top:10px;display:flex;gap:8px;z-index:2;align-items:center}
   .pill{background:rgba(14,20,44,.8);border:1px solid #3a4b8c;border-radius:999px;padding:6px 10px;font-weight:800}
   .tip{position:absolute;right:10px;top:10px;opacity:.7;font-size:12px;z-index:2}
 
@@ -68,14 +69,13 @@
     40%,60%{transform:translate3d(4px,0,0)}
   }
 
-  /* ====== ゲームオーバー（ポップアップ） ====== */
-  .gameover{
+  /* ====== 共通：フルスクリーンパネル ====== */
+  .panel-layer{
     position:absolute; inset:0; display:none; place-items:center; z-index:5;
-    background:radial-gradient(ellipse at center, rgba(120,0,0,.25), rgba(0,0,0,.85) 60%);
     backdrop-filter: blur(1px);
   }
-  .gameover.is-show{ display:grid; animation:goFade .18s ease-out both }
-  @keyframes goFade{ from{opacity:0} to{opacity:1} }
+  .panel-layer.is-show{ display:grid; animation:fadeIn .18s ease-out both }
+  @keyframes fadeIn{ from{opacity:0} to{opacity:1} }
 
   .go-panel{
     max-width:min(92%, 1400px);
@@ -83,9 +83,9 @@
     aspect-ratio:16/9;
     border-radius:14px;
     overflow:hidden;
-    box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 0 2px rgba(255,0,0,.25) inset;
     position:relative;
     background:#000;
+    box-shadow:0 30px 80px rgba(0,0,0,.7);
   }
   .go-img{
     position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
@@ -105,9 +105,21 @@
     box-shadow:0 6px 16px rgba(179,18,18,.35);
   }
   .go-btn:hover{ filter:brightness(1.08) }
-  .go-sub{
-    position:absolute; left:12px; bottom:12px; font-size:13px; opacity:.85; color:#ffdede;
-  }
+  .go-sub{ position:absolute; left:12px; bottom:12px; font-size:13px; opacity:.85; }
+
+  /* ゲームオーバー色味 */
+  #gameover{ background:radial-gradient(ellipse at center, rgba(120,0,0,.25), rgba(0,0,0,.85) 60%); }
+  #gameover .go-sub{ color:#ffdede; }
+
+  /* 勝利パネル色味 */
+  #win{ background:radial-gradient(ellipse at center, rgba(0,90,40,.25), rgba(0,0,0,.85) 60%); }
+  #win .go-btn{ border-color:#2fc47a; background:#0e6b44; box-shadow:0 6px 16px rgba(20,200,120,.35); }
+  #win .go-sub{ color:#d5ffeb; }
+
+  /* アイテムHUD */
+  .items{display:flex;align-items:center;gap:6px}
+  .itemDot{width:18px;height:18px;border-radius:4px;border:1px solid #3a4b8c;background:#12204a;display:inline-block;overflow:hidden}
+  .itemDot img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.1)}
 </style>
 </head>
 <body>
@@ -124,18 +136,26 @@
 
     <div class="stage">
       <canvas id="cv" width="1920" height="1080"></canvas>
+
       <div class="hud">
         <div class="pill">TIME <span id="time">0.0</span>s</div>
         <div class="pill">STATE <span id="state">PATROL</span></div>
+        <div class="pill items">
+          ITEMS <span id="got">0</span>/3
+          <span class="itemDot"><img id="dotMoney"  alt=""></span>
+          <span class="itemDot"><img id="dotFlower" alt=""></span>
+          <span class="itemDot"><img id="dotSushi"  alt=""></span>
+        </div>
       </div>
+
       <div class="dialog" id="dialog">
         <img id="face" class="face" alt="">
         <div id="line" class="bubble">準備中…</div>
       </div>
       <div class="tip">Space：当たり判定オーバーレイ切替（画像マスク/格子）</div>
 
-      <!-- ▼ ゲームオーバー：捕まったら出る -->
-      <div class="gameover" id="gameover">
+      <!-- ▼ ゲームオーバー -->
+      <div class="panel-layer" id="gameover">
         <div class="go-panel">
           <img id="goImg" class="go-img" alt="gameover">
           <div class="go-ui">
@@ -146,6 +166,19 @@
         </div>
       </div>
       <!-- ▲ ゲームオーバー -->
+
+      <!-- ▼ 勝利パネル -->
+      <div class="panel-layer" id="win">
+        <div class="go-panel">
+          <img id="winImg" class="go-img" alt="win">
+          <div class="go-ui">
+            <button id="retryBtnW" class="go-btn">もう一度（R）</button>
+            <button id="closeBtnW" class="go-btn" style="background:#333;border-color:#888">閉じる（Esc）</button>
+          </div>
+          <div class="go-sub">3つのアイテムを集めた！Rで再挑戦</div>
+        </div>
+      </div>
+      <!-- ▲ 勝利パネル -->
     </div>
   </div>
 </div>
@@ -164,13 +197,24 @@ const ui = {
   face : document.getElementById('face'),
   line : document.getElementById('line'),
   dialog: document.getElementById('dialog'),
+  got  : document.getElementById('got'),
+  dotMoney:  document.getElementById('dotMoney'),
+  dotFlower: document.getElementById('dotFlower'),
+  dotSushi:  document.getElementById('dotSushi'),
   goLayer: document.getElementById('gameover'),
   goImg: document.getElementById('goImg'),
   retry: document.getElementById('retryBtn'),
-  close: document.getElementById('closeBtn')
+  close: document.getElementById('closeBtn'),
+  winLayer: document.getElementById('win'),
+  winImg: document.getElementById('winImg'),
+  retryW: document.getElementById('retryBtnW'),
+  closeW: document.getElementById('closeBtnW')
 };
 
-const assets = { map:null, player:null, oni:null, facePlayer:null, faceOni:null, mask:null, gameover:null };
+const assets = {
+  map:null, player:null, oni:null, facePlayer:null, faceOni:null, mask:null, gameover:null, win:null,
+  itMoney:null, itFlowers:null, itSushi:null
+};
 
 /* ====== サウンド（Web Audio） ====== */
 const audio = {
@@ -195,10 +239,12 @@ async function initAudioOnce(){
   await Promise.all([
     loadBuffer('bgm/main_loop.mp3','bgm_main'),
     loadBuffer('bgm/chase_loop.mp3','bgm_chase'),
-    loadBuffer('se/step.wav','se_step'),
+    loadBuffer('bgm/win.mp3','bgm_win'),
+    loadBuffer('se/step.mp3','se_step'),
     loadBuffer('se/catch.mp3','se_catch'),
     loadBuffer('se/click.mp3','se_click'),
-  ].map(p=>p.catch(()=>{}))); // ファイル未配置でも落ちないように
+    loadBuffer('se/get.mp3','se_get')
+  ].map(p=>p.catch(()=>{})));
 }
 async function loadBuffer(url,key){
   const res = await fetch(url); const arr = await res.arrayBuffer();
@@ -264,6 +310,14 @@ let useMask=false;
 const DIR={UP:0,LEFT:1,DOWN:2,RIGHT:3};
 function makeAnim(){ return {dir:DIR.DOWN, f:1, t:0, rows:3, cols:3, hasLeft:false, rightRow:1, downRow:0, upRow:2}; }
 
+/* ====== アイテム ====== */
+let items=[];      // {id,x,y,img,got}
+let gotCount=0;
+const bursts=[];   // 「ゲット！」演出 {x,y,t}
+
+function px(x){ return x*(WORLD_W/1920); }
+function py(y){ return y*(WORLD_H/1080); }
+
 async function preload(){
   assets.map = await loadImage('map_1920x1080.png');   // 実寸 1536x1024 を想定
   assets.player = await loadImage('player.png');
@@ -272,6 +326,10 @@ async function preload(){
   assets.faceOni    = await loadImage('portrait_oni.png');
   assets.mask      = await loadImageOptional('collision_mask.png');
   assets.gameover  = await loadImageOptional('gameover.png');
+  assets.win       = await loadImageOptional('win.png');             // 勝利画像（任意）
+  assets.itMoney   = await loadImageOptional('money.png');
+  assets.itFlowers = await loadImageOptional('flower.png');
+  assets.itSushi   = await loadImageOptional('sushi.png');
 
   WORLD_W = assets.map.naturalWidth;
   WORLD_H = assets.map.naturalHeight;
@@ -284,6 +342,11 @@ async function preload(){
   TILE = Math.round(WORLD_W / 64);
   COLS = Math.floor(WORLD_W / TILE);
   ROWS = Math.floor(WORLD_H / TILE);
+
+  // HUDアイコン
+  if(assets.itMoney)  ui.dotMoney.src  = assets.itMoney.src;
+  if(assets.itFlowers)ui.dotFlower.src = assets.itFlowers.src;
+  if(assets.itSushi)  ui.dotSushi.src  = assets.itSushi.src;
 }
 
 function worldToScreen(x,y){ return { x: Math.round(OFFX + x * SCALE), y: Math.round(OFFY + y * SCALE) }; }
@@ -462,6 +525,78 @@ function say(faceImg, text){
   lastSpeak = performance.now();
 }
 
+/* ===== アイテム：配置・描画・取得 ===== */
+function resetItems(){
+  gotCount = 0;
+  ui.got.textContent = '0';
+  items = [
+    {id:'money',  img:assets.itMoney,   x:px(740),  y:py(620),  got:false}, // リビング中央やや左
+    {id:'flower', img:assets.itFlowers, x:px(820),  y:py(325),  got:false}, // ダイニング付近
+    {id:'sushi',  img:assets.itSushi,   x:px(1370), y:py(955),  got:false}  // 南東の通路
+  ];
+  // 通行可能セルへスナップ
+  items = items.map(it=>{
+    const p = snapToWalkable(it.x, it.y);
+    return {...it, x:p.x, y:p.y, got:false};
+  });
+}
+function drawItems(){
+  const size = 42; // 推奨48px前後。画像がなくても簡易描画
+  for(const it of items){
+    if(it.got) continue;
+    const p = worldToScreen(it.x,it.y);
+    const w = size*SCALE, h = size*SCALE;
+    if(it.img){
+      ctx.drawImage(it.img, p.x-w/2, p.y-h/2, w, h);
+    }else{
+      ctx.save();
+      ctx.fillStyle='rgba(255,255,180,.95)';
+      ctx.strokeStyle='rgba(0,0,0,.6)';
+      ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.roundRect(p.x-w/2,p.y-h/2,w,h,6);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#222'; ctx.font=`${Math.max(10,14*SCALE)}px system-ui`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(it.id.toUpperCase(), p.x, p.y);
+      ctx.restore();
+    }
+  }
+}
+function tryPickup(){
+  const R = Math.max(20, TILE*0.7);
+  for(const it of items){
+    if(it.got) continue;
+    const d = Math.hypot(player.x-it.x, player.y-it.y);
+    if(d < R){
+      it.got = true;
+      gotCount++;
+      ui.got.textContent = `${gotCount}`;
+      bursts.push({x:it.x, y:it.y, t:0});
+      if(audio.ctx) playSfx('se_get', {volume:1});
+    }
+  }
+  if(gotCount>=3) triggerWin();
+}
+function drawBursts(dt){
+  for(let i=bursts.length-1;i>=0;i--){
+    const b = bursts[i];
+    b.t += dt;
+    const p = worldToScreen(b.x, b.y - Math.min(60, b.t*1.5));
+    const a = Math.max(0, 1 - b.t/40);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle='#fff';
+    ctx.font = `${Math.max(16, 28*SCALE)}px "Hiragino Kaku Gothic ProN", system-ui, sans-serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.strokeStyle='rgba(0,0,0,.7)'; ctx.lineWidth=4;
+    ctx.strokeText('ゲット！', p.x, p.y);
+    ctx.fillStyle='#36ff9c';
+    ctx.fillText('ゲット！', p.x, p.y);
+    ctx.restore();
+    if(a<=0.01) bursts.splice(i,1);
+  }
+}
+
 /* ===== 入力 ===== */
 const keys=new Set();
 addEventListener('keydown', e=>{
@@ -470,7 +605,7 @@ addEventListener('keydown', e=>{
   if(e.code==='Space') debug=!debug;
   if(over){
     if(e.key==='r' || e.key==='R') doRetry();
-    if(e.key==='Escape') closeGameOver();
+    if(e.key==='Escape'){ closePanels(); }
   }
 });
 addEventListener('keyup', e=>keys.delete(e.key));
@@ -492,6 +627,9 @@ function update(ts){
   // 足音（軽く）
   if(moving && audio.ctx && frame%6===0){ playSfx('se_step', {volume:0.25, rate:0.95+Math.random()*0.1}); }
 
+  // アイテム取得チェック
+  tryPickup();
+
   // 鬼AI（簡易）
   const DETECT=260*(WORLD_W/1920);
   const dx=player.x-oni.x, dy=player.y-oni.y, d=Math.hypot(dx,dy);
@@ -500,7 +638,6 @@ function update(ts){
     updateAnim(oni, vxO, vyO, true); moveEntity(oni, vxO, vyO);
     if(performance.now()-lastSpeak>1600){ say(assets.faceOni.src, lines.oni_chase); }
     ui.state.textContent='CHASE';
-    // BGM 切替（追跡）
     if(audio.ctx) playBgm('bgm_chase', {fade:0.4, loop:true});
   }else{
     if(frame%30===0){ const a=Math.random()*Math.PI*2; oni._rv={x:Math.cos(a),y:Math.sin(a)}; }
@@ -508,7 +645,6 @@ function update(ts){
     moveEntity(oni, oni._rv.x*sp, oni._rv.y*sp);
     if(performance.now()-lastSpeak>2600){ say(assets.faceOni.src, lines.oni_patrol); }
     ui.state.textContent='PATROL';
-    // BGM 切替（通常）
     if(audio.ctx) playBgm('bgm_main', {fade:0.6, loop:true});
   }
 
@@ -518,11 +654,17 @@ function update(ts){
   }
 
   ui.time.textContent=(parseFloat(ui.time.textContent)+dt/60).toFixed(1);
+
+  // 演出更新
+  drawBursts(1); // dt=1相当（内部単位）
 }
 
 function draw(){
   ctx.clearRect(0,0,VIEW_W,VIEW_H);
   drawImageFit(assets.map);
+
+  // アイテム（下層）
+  drawItems();
 
   if(!player.anim._init && assets.player){ Object.assign(player.anim, analyzeSheet(assets.player)); player.anim._init=true; }
   if(!oni.anim._init && assets.oni){ Object.assign(oni.anim, analyzeSheet(assets.oni)); oni.anim._init=true; }
@@ -530,10 +672,13 @@ function draw(){
   drawSprite(player, assets.player, 48);
   drawSprite(oni,    assets.oni,    64);
 
+  // 「ゲット！」テキストはスプライトの上
+  drawBursts(0);
+
   if(debug) drawCollisionOverlay();
 }
 
-/* ====== ゲームオーバー関連 ====== */
+/* ====== パネル：ゲームオーバー / 勝利 ====== */
 function triggerGameOver(){
   if(over) return;
   over = true;
@@ -542,13 +687,21 @@ function triggerGameOver(){
   if(assets.gameover){ ui.goImg.src = assets.gameover.src; }
   ui.goLayer.classList.add('is-show');
 }
-function closeGameOver(){
+function triggerWin(){
+  if(over) return;
+  over = true;
+  if(audio.ctx){ stopBgm(0.4); playBgm('bgm_win', {fade:0.5, loop:false}); }
+  if(assets.win){ ui.winImg.src = assets.win.src; }
+  ui.winLayer.classList.add('is-show');
+}
+function closePanels(){
   ui.goLayer.classList.remove('is-show');
+  ui.winLayer.classList.remove('is-show');
 }
 function doRetry(){
-  closeGameOver();
+  closePanels();
   started = false;
-  resetPositions();
+  resetAll();
   // すぐ再開
   started = true; over = false; lastTs = performance.now();
   say(assets.facePlayer.src,"再開！");
@@ -556,14 +709,15 @@ function doRetry(){
 }
 
 /* ===== リセット & UI ===== */
-function resetPositions(){
+function resetAll(){
   const p=snapToWalkable(180*(WORLD_W/1920),180*(WORLD_H/1080)); player.x=p.x; player.y=p.y;
   const o=snapToWalkable(1160*(WORLD_W/1920), 330*(WORLD_H/1080)); oni.x=o.x; oni.y=o.y; oni.state='PATROL'; oni.path=[]; oni.target=null;
   ui.time.textContent='0.0';
   ui.dialog.classList.remove('dialog--oni','shake');
   ui.face.src = assets.facePlayer ? assets.facePlayer.src : '';
   ui.line.textContent = "準備中…";
-  closeGameOver();
+  closePanels();
+  resetItems();
 }
 
 ui.start.addEventListener('click', async ()=>{
@@ -577,11 +731,13 @@ ui.start.addEventListener('click', async ()=>{
   }
 });
 ui.reset.addEventListener('click', ()=>{
-  started=false; over=false; resetPositions();
+  started=false; over=false; resetAll();
   if(audio.ctx){ playSfx('se_click', {volume:.6}); playBgm('bgm_main', {fade:0.4, loop:true}); }
 });
 ui.retry.addEventListener('click', doRetry);
-ui.close.addEventListener('click', closeGameOver);
+ui.close.addEventListener('click', closePanels);
+ui.retryW.addEventListener('click', doRetry);
+ui.closeW.addEventListener('click', closePanels);
 ui.mute.addEventListener('click', ()=>{
   if(!audio.ctx) return; setMuted(!audio.muted); playSfx('se_click', {volume:.6});
 });
@@ -592,7 +748,7 @@ function loop(ts){ update(ts); draw(); requestAnimationFrame(loop); }
 (async function main(){
   await preload();
   await loadCollision();           // collision_mask.png → 無ければ collision.json
-  resetPositions();
+  resetAll();
   lastTs = performance.now();
   loop();
 })();
